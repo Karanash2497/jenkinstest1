@@ -15,7 +15,7 @@ app.get('/', (req, res) => {
       <body style="font-family:Arial; text-align:center; padding:50px;
         background:${colors[ENV] || '#6B7280'}">
         <h1 style="color:white">🚀 ${ENV.toUpperCase()} Environment</h1>
-        <p style="color:white">Deployed via Jenkins + Docker</p>
+        <p style="color:white">Deployed via Jenkins + Docker!</p>
         <p style="color:white">Build: #${process.env.BUILD_NUMBER || 'local'}</p>
         <p style="color:white">Time: ${new Date().toLocaleString()}</p>
       </body>
