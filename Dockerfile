@@ -20,11 +20,3 @@ EXPOSE 3000
 CMD ["node", "app.js"]
 ```
 
----
-
-**File 5: `.dockerignore`**
-```
-node_modules
-.git
-*.log
-Jenkinsfile
