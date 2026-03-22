@@ -3,16 +3,15 @@ pipeline {
 
     environment {
         AWS_REGION     = 'ap-south-1'
-        ECR_REPO       = '992382473180.dkr.ecr.ap-south-1.amazonaws.com/jenkinstest1'
+        ECR_REPO       = 'YOUR_ECR_URI/jenkinstest1'
         IMAGE_TAG      = "build-${BUILD_NUMBER}"
-        CONTAINER_NAME = 'jenkinstest1'
     }
 
     stages {
 
         stage('Checkout') {
             steps {
-                echo 'Pulling latest code from GitHub...'
+                echo "Building branch: ${env.BRANCH_NAME}"
                 checkout scm
             }
         }
@@ -30,60 +29,136 @@ pipeline {
                 sh '''
                     docker build -t $ECR_REPO:$IMAGE_TAG .
                     docker tag $ECR_REPO:$IMAGE_TAG $ECR_REPO:latest
-                    echo "Image built: $ECR_REPO:$IMAGE_TAG"
+                    echo "Built: $ECR_REPO:$IMAGE_TAG"
                 '''
             }
         }
 
         stage('Push to ECR') {
             steps {
-                echo 'Pushing image to AWS ECR...'
+                echo 'Pushing to ECR...'
                 sh '''
                     aws ecr get-login-password --region $AWS_REGION | \
                     docker login --username AWS --password-stdin $ECR_REPO
                     docker push $ECR_REPO:$IMAGE_TAG
                     docker push $ECR_REPO:latest
-                    echo "Image pushed successfully"
                 '''
             }
         }
 
-        stage('Deploy Container') {
+        // ── DEV DEPLOY ──
+        stage('Deploy to Dev') {
+            when {
+                branch 'develop'
+            }
             steps {
-                echo 'Deploying container...'
+                echo 'Deploying to DEV environment...'
                 sh '''
-                    # Login to ECR
                     aws ecr get-login-password --region $AWS_REGION | \
                     docker login --username AWS --password-stdin $ECR_REPO
 
-                    # Pull latest image
                     docker pull $ECR_REPO:latest
+                    docker stop app-dev 2>/dev/null || true
+                    docker rm app-dev 2>/dev/null || true
 
-                    # Stop and remove old container
-                    docker stop $CONTAINER_NAME 2>/dev/null || true
-                    docker rm $CONTAINER_NAME 2>/dev/null || true
-
-                    # Run new container
                     docker run -d \
-                        --name $CONTAINER_NAME \
+                        --name app-dev \
                         --restart unless-stopped \
-                        -p 3000:3000 \
+                        -p 3001:3000 \
+                        -e APP_ENV=dev \
                         -e BUILD_NUMBER=$BUILD_NUMBER \
                         $ECR_REPO:latest
 
-                    echo "Container deployed!"
+                    echo "Dev deployed on port 3001"
+                '''
+            }
+        }
+
+        // ── STAGING DEPLOY ──
+        stage('Deploy to Staging') {
+            when {
+                branch 'staging'
+            }
+            steps {
+                echo 'Deploying to STAGING environment...'
+                sh '''
+                    aws ecr get-login-password --region $AWS_REGION | \
+                    docker login --username AWS --password-stdin $ECR_REPO
+
+                    docker pull $ECR_REPO:latest
+                    docker stop app-staging 2>/dev/null || true
+                    docker rm app-staging 2>/dev/null || true
+
+                    docker run -d \
+                        --name app-staging \
+                        --restart unless-stopped \
+                        -p 3002:3000 \
+                        -e APP_ENV=staging \
+                        -e BUILD_NUMBER=$BUILD_NUMBER \
+                        $ECR_REPO:latest
+
+                    echo "Staging deployed on port 3002"
+                '''
+            }
+        }
+
+        // ── PROD DEPLOY WITH APPROVAL ──
+        stage('Approval for Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo 'Waiting for production approval...'
+                timeout(time: 10, unit: 'MINUTES') {
+                    input message: 'Deploy to PRODUCTION?',
+                          ok: 'Yes, Deploy!',
+                          submitter: 'admin'
+                }
+            }
+        }
+
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo 'Deploying to PRODUCTION...'
+                sh '''
+                    aws ecr get-login-password --region $AWS_REGION | \
+                    docker login --username AWS --password-stdin $ECR_REPO
+
+                    docker pull $ECR_REPO:latest
+                    docker stop app-prod 2>/dev/null || true
+                    docker rm app-prod 2>/dev/null || true
+
+                    docker run -d \
+                        --name app-prod \
+                        --restart unless-stopped \
+                        -p 3000:3000 \
+                        -e APP_ENV=production \
+                        -e BUILD_NUMBER=$BUILD_NUMBER \
+                        $ECR_REPO:latest
+
+                    echo "Production deployed on port 3000"
                 '''
             }
         }
 
         stage('Health Check') {
             steps {
-                echo 'Checking app is live...'
+                echo 'Running health check...'
                 sh '''
                     sleep 5
-                    curl -f http://localhost:3000/health || exit 1
-                    echo "✅ Health check passed!"
-                    docker ps | grep $CONTAINER_NAME
+                    if [ "$BRANCH_NAME" = "develop" ]; then
+                        curl -f http://localhost:3001/health || exit 1
+                        echo "Dev health check passed!"
+                    elif [ "$BRANCH_NAME" = "staging" ]; then
+                        curl -f http://localhost:3002/health || exit 1
+                        echo "Staging health check passed!"
+                    elif [ "$BRANCH_NAME" = "main" ]; then
+                        curl -f http://localhost:3000/health || exit 1
+                        echo "Production health check passed!"
+                    fi
                 '''
             }
         }
@@ -91,15 +166,10 @@ pipeline {
 
     post {
         success {
-            sh '''
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                echo "✅ PIPELINE SUCCESS"
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                docker ps --filter name=$CONTAINER_NAME
-            '''
+            echo "Pipeline SUCCESS on branch: ${env.BRANCH_NAME}"
         }
         failure {
-            echo '❌ Pipeline FAILED — check logs above'
+            echo "Pipeline FAILED on branch: ${env.BRANCH_NAME}"
         }
     }
 }
