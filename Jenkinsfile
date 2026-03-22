@@ -5,7 +5,7 @@ pipeline {
         AWS_REGION     = 'ap-south-1'
         ECR_REPO       = '992382473180.dkr.ecr.ap-south-1.amazonaws.com/jenkinstest1'
         IMAGE_TAG      = "build-${BUILD_NUMBER}"
-        CONTAINER_NAME = 'jenkinstest'
+        CONTAINER_NAME = 'jenkinstest1'
     }
 
     stages {
